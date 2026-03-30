@@ -1,12 +1,20 @@
 import pandas as pd
 
+
 def load_data(path):
     cols = ['unit', 'cycle'] + \
-           [f'op_setting_{i}' for i in range(1,4)] + \
-           [f'sensor_{i}' for i in range(1,22)]
+           [f'op_setting_{i}' for i in range(1, 4)] + \
+           [f'sensor_{i}' for i in range(1, 22)]
 
-    df = pd.read_csv(path, sep=" ", header=None)
+    # CMAPSS files can contain variable spacing and a trailing blank column.
+    df = pd.read_csv(path, sep=r"\s+", header=None, engine="python")
     df = df.dropna(axis=1)
+
+    if df.shape[1] != len(cols):
+        raise ValueError(
+            f"Unexpected column count in {path}: got {df.shape[1]}, expected {len(cols)}"
+        )
+
     df.columns = cols
 
     return df

@@ -9,7 +9,7 @@ class DecisionEngine:
             return "RETRAIN"
 
         # Case 2: Error increasing → watch carefully
-        if trend and rolling_avg and rolling_avg > self.error_threshold:
+        if trend and rolling_avg is not None and rolling_avg > self.error_threshold:
             return "MONITOR"
 
         # Case 3: Everything fine

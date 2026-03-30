@@ -1,19 +1,22 @@
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GroupShuffleSplit
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_error
-import pandas as pd
+
 
 def train_model(df):
 
     # features
     X = df.drop(columns=['RUL', 'unit', 'cycle'])
     y = df['RUL']
+    groups = df['unit']
 
-    # split
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
+    # Split by engine unit to avoid leakage across cycles from the same unit.
+    splitter = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
+    train_idx, test_idx = next(splitter.split(X, y, groups=groups))
+
+    X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
+    y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
 
     # scaling
     scaler = StandardScaler()
@@ -21,7 +24,12 @@ def train_model(df):
     X_test_scaled = scaler.transform(X_test)
 
     # model
-    model = RandomForestRegressor(n_estimators=100, max_depth=10)
+    model = RandomForestRegressor(
+        n_estimators=200,
+        max_depth=12,
+        random_state=42,
+        n_jobs=-1,
+    )
     model.fit(X_train_scaled, y_train)
 
     # evaluation
