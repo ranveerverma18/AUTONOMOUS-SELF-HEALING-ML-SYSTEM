@@ -19,4 +19,6 @@ def add_rul(df):   #rul-remaining useful life
     df = df.merge(max_cycle, on='unit')
     df['RUL'] = df['max_cycle'] - df['cycle']
 
+    df['RUL']= df['RUL'].clip(upper=125)  # cap RUL at 125
+
     return df.drop(columns=['max_cycle'])

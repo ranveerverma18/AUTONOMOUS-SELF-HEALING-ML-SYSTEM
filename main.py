@@ -4,39 +4,45 @@ from simulation.chaos_controller import inject_noise, inject_drift
 from ml.train import train_model
 from ml.predict import predict
 from drift.error_monitor import ErrorMonitor
+from drift.adwin_detector import DriftDetector
 
-# load + preprocess
+# load data
 df = load_data("dataset/raw/train_FD001.txt")
 df = add_rul(df)
 
 # train model
-model = train_model(df)
+model,scaler = train_model(df)
 
-# initialize monitor
+# monitors
 monitor = ErrorMonitor(window_size=5)
+detector = DriftDetector()
 
-print("\n--- STREAM + ERROR MONITORING ---\n")
+print("\n--- STREAM + DRIFT DETECTION ---\n")
 
-for i, data in enumerate(stream_data(df.head(30))):
+for i, data in enumerate(stream_data(df.head(200))):
 
     # chaos
     data = inject_noise(data)
     if i > 10:
-        data = inject_drift(data)
+        data = inject_drift(data,shift=10)
 
     # prediction
     actual = data['RUL']
-    pred = predict(model, data)
+    pred = predict(model,scaler, data)
     error = abs(actual - pred)
 
-    # update monitor
+    # monitoring
     rolling_avg = monitor.update(error)
     trend = monitor.is_increasing()
+
+    # ADWIN
+    drift = detector.update(rolling_avg if rolling_avg else error)
 
     # print
     print(
         f"Cycle: {int(data['cycle'])} | "
         f"Error: {error:.2f} | "
         f"Rolling Avg: {rolling_avg if rolling_avg else '...'} | "
-        f"Trend Increasing: {trend}"
+        f"Trend: {trend} | "
+        f"ADWIN Drift: {drift}"
     )
