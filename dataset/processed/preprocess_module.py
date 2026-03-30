@@ -12,7 +12,7 @@ def load_data(path):
     return df
 
 
-def add_rul(df):
+def add_rul(df):   #rul-remaining useful life
     max_cycle = df.groupby('unit')['cycle'].max().reset_index()
     max_cycle.columns = ['unit', 'max_cycle']
 

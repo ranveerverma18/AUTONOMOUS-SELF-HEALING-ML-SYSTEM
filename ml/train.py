@@ -3,7 +3,7 @@ from sklearn.model_selection import train_test_split
 import pandas as pd
 
 def train_model(df):
-    X = df.drop(columns=['RUL'])
+    X = df.drop(columns=['RUL','unit'])
     y = df['RUL']
 
     X_train, X_test, y_train, y_test = train_test_split(

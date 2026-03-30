@@ -1,7 +1,12 @@
 def predict(model, data):
-    # remove target if present
-    if 'RUL' in data:
-        data = data.drop('RUL')
+    # convert dict → DataFrame-like structure
+    import pandas as pd
 
-    prediction = model.predict([data])[0]
+    df = pd.DataFrame([data])
+
+    # drop target + unit (VERY IMPORTANT)
+    df = df.drop(columns=['RUL', 'unit'], errors='ignore')
+
+    prediction = model.predict(df)[0]
+
     return prediction
