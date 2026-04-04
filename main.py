@@ -1,13 +1,14 @@
 from dataset.processed.preprocess_module import load_data, add_rul
 from simulation.data_generator import stream_data
 from simulation.chaos_controller import inject_noise, inject_drift
-from ml.train import train_model
+from ml.train import train_model, train_model_with_holdout
 from ml.predict import predict
 from drift.error_monitor import ErrorMonitor
 from drift.adwin_detector import DriftDetector
 from decision.engine import DecisionEngine
 from sklearn.model_selection import train_test_split
 from collections import deque
+from drift.data_drift import DataDriftDetector
 import numpy as np
 
 
@@ -65,6 +66,7 @@ def run_pipeline():
     # monitors
     monitor = ErrorMonitor(window_size=5)
     detector = DriftDetector()
+    data_drift_detector = DataDriftDetector(window_size=30)
     engine = DecisionEngine(error_threshold=40)
     buffer = deque(maxlen=100)  # last 100 samples
     drift_confirmations_needed = 1
@@ -98,9 +100,14 @@ def run_pipeline():
         # ADWIN
         drift_input = rolling_avg if rolling_avg is not None else error
         drift = detector.update(drift_input)
+        data_drift_result = data_drift_detector.update_with_details(data)
+        data_drift = data_drift_result["drift_detected"]
+        drift_score = data_drift_result["drift_score"]
+        drifted_features = data_drift_result["drifted_features"]
+        combined_drift = drift or data_drift
         consecutive_drift = consecutive_drift + 1 if drift else 0
 
-        action = engine.decide(drift, rolling_avg, trend)
+        action = engine.decide(combined_drift, rolling_avg, trend)
         logs.append(
             {
                 "event": "cycle",
@@ -110,6 +117,10 @@ def run_pipeline():
                 "rolling_avg": None if rolling_avg is None else float(rolling_avg),
                 "trend": bool(trend),
                 "drift": bool(drift),
+                "data_drift": bool(data_drift),
+                "combined_drift": bool(combined_drift),
+                "data_drift_score": float(drift_score),
+                "drifted_features": list(drifted_features),
                 "action": action,
             }
         )
@@ -120,6 +131,9 @@ def run_pipeline():
             f"Rolling Avg: {rolling_avg if rolling_avg is not None else '...'} | "
             f"Trend: {trend} | "
             f"ADWIN Drift: {drift} |"
+            f"Data Drift: {data_drift} | "
+            f"Drift Score: {drift_score:.3f} | "
+            f"Drifted Features: {drifted_features} | "
             f"Action: {action}"
         )
 
@@ -179,8 +193,8 @@ def run_pipeline():
                 )
                 continue
 
-            # retrain
-            model, scaler = train_model(new_df)
+            # retrain with a time-aware holdout for honest evaluation.
+            model, scaler, retrain_val_mae = train_model_with_holdout(new_df)
             last_retrain_cycle_idx = i
             consecutive_drift = 0
             logs.append(
@@ -189,13 +203,17 @@ def run_pipeline():
                     "index": i,
                     "cycle": int(data["cycle"]),
                     "buffer_size": len(buffer),
+                    "validation_mae": retrain_val_mae,
                 }
             )
 
             # reset systems
             detector = DriftDetector()
+            data_drift_detector = DataDriftDetector(window_size=30)
             monitor = ErrorMonitor(window_size=5)
 
+            if retrain_val_mae is not None:
+                print(f"Validation MAE after retrain: {retrain_val_mae:.2f}")
             print("Model retrained successfully\n")
 
     retrain_count = sum(1 for entry in logs if entry["event"] == "retrained")
