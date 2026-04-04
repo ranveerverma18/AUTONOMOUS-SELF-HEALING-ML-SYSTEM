@@ -9,6 +9,7 @@ from decision.engine import DecisionEngine
 from sklearn.model_selection import train_test_split
 from collections import deque
 from drift.data_drift import DataDriftDetector
+import mlflow
 import numpy as np
 
 
@@ -67,13 +68,12 @@ def run_pipeline():
     monitor = ErrorMonitor(window_size=5)
     detector = DriftDetector()
     data_drift_detector = DataDriftDetector(window_size=30)
-    engine = DecisionEngine(error_threshold=40)
+    engine = DecisionEngine(error_threshold=25)
     buffer = deque(maxlen=100)  # last 100 samples
-    drift_confirmations_needed = 1
-    retrain_cooldown_cycles = 30
-    consecutive_drift = 0
+    retrain_cooldown_cycles = 15
     last_retrain_cycle_idx = -retrain_cooldown_cycles
     retrain_error_threshold = engine.error_threshold
+    skipped_retrains = 0
     logs = []
 
     print("\n--- STREAM + DRIFT DETECTION ---\n")
@@ -105,7 +105,6 @@ def run_pipeline():
         drift_score = data_drift_result["drift_score"]
         drifted_features = data_drift_result["drifted_features"]
         combined_drift = drift or data_drift
-        consecutive_drift = consecutive_drift + 1 if drift else 0
 
         action = engine.decide(combined_drift, rolling_avg, trend)
         logs.append(
@@ -137,8 +136,16 @@ def run_pipeline():
             f"Action: {action}"
         )
 
-        drift_confirmed = consecutive_drift >= drift_confirmations_needed
         cooldown_elapsed = (i - last_retrain_cycle_idx) >= retrain_cooldown_cycles
+
+        if action == "RETRAIN":
+            print("\n🔍 RETRAIN DEBUG INFO")
+            print(f"Cycle: {int(data['cycle'])}")
+            print(f"Rolling Avg: {rolling_avg}")
+            print(f"Threshold: {engine.error_threshold}")
+            print(f"Cooldown OK: {(i - last_retrain_cycle_idx) >= retrain_cooldown_cycles}")
+            print(f"Drift Signal: {drift}")
+            print(f"Buffer Size: {len(buffer)}")
 
         if (
             action == "RETRAIN"
@@ -193,32 +200,95 @@ def run_pipeline():
                 )
                 continue
 
-            # retrain with a time-aware holdout for honest evaluation.
-            model, scaler, retrain_val_mae = train_model_with_holdout(new_df)
+            min_retrain_rows = 30
+            retrain_data_size = len(new_df)
+            new_model, new_scaler, new_mae = None, None, None
+            print(f"Retrain decision -> data size: {retrain_data_size}")
+
+            try:
+                with mlflow.start_run(run_name="retrain_attempt"):
+                    mlflow.log_param("trigger", "drift")
+                    mlflow.log_metric("data_size", retrain_data_size)
+
+                    if retrain_data_size < min_retrain_rows:
+                        mlflow.log_param("status", "skipped")
+                        print("❌ Retrain skipped: insufficient data")
+                        print("Reason: insufficient data")
+                    else:
+                        mlflow.log_param("status", "executed")
+                        print("✅ Retrain executed")
+                        # train + holdout + model logging happens in train_model_with_holdout.
+                        new_model, new_scaler, new_mae = train_model_with_holdout(
+                            new_df,
+                            min_retrain_rows=min_retrain_rows,
+                        )
+            except Exception as err:
+                print(f"MLflow retrain_attempt logging warning: {err}")
+                if retrain_data_size >= min_retrain_rows:
+                    new_model, new_scaler, new_mae = train_model_with_holdout(
+                        new_df,
+                        min_retrain_rows=min_retrain_rows,
+                    )
+
+            if retrain_data_size < min_retrain_rows:
+                skipped_retrains += 1
+                logs.append(
+                    {
+                        "event": "retrain_skipped",
+                        "index": i,
+                        "cycle": int(data["cycle"]),
+                        "reason": f"insufficient retrain data (< {min_retrain_rows})",
+                        "buffer_size": retrain_data_size,
+                    }
+                )
+                continue
+
             last_retrain_cycle_idx = i
-            consecutive_drift = 0
-            logs.append(
-                {
-                    "event": "retrained",
-                    "index": i,
-                    "cycle": int(data["cycle"]),
-                    "buffer_size": len(buffer),
-                    "validation_mae": retrain_val_mae,
-                }
-            )
+            if new_mae is not None:
+                print(f"Validation MAE after retrain: {new_mae:.2f}")
 
-            # reset systems
-            detector = DriftDetector()
-            data_drift_detector = DataDriftDetector(window_size=30)
-            monitor = ErrorMonitor(window_size=5)
+            if (
+                new_model is not None
+                and new_scaler is not None
+            ):
+                print("Accept retrained model")
+                model = new_model
+                scaler = new_scaler
+                logs.append(
+                    {
+                        "event": "retrained",
+                        "index": i,
+                        "cycle": int(data["cycle"]),
+                        "buffer_size": len(buffer),
+                        "validation_mae": new_mae,
+                    }
+                )
 
-            if retrain_val_mae is not None:
-                print(f"Validation MAE after retrain: {retrain_val_mae:.2f}")
-            print("Model retrained successfully\n")
+                # reset systems after model swap.
+                detector = DriftDetector()
+                data_drift_detector = DataDriftDetector(window_size=30)
+                monitor = ErrorMonitor(window_size=5)
+
+                print("Model retrained successfully\n")
+            else:
+                print("Reject retrained model\n")
+                logs.append(
+                    {
+                        "event": "retrain_rejected",
+                        "index": i,
+                        "cycle": int(data["cycle"]),
+                        "buffer_size": len(buffer),
+                        "candidate_mae": new_mae,
+                        "reason": "insufficient retrain data or invalid candidate",
+                    }
+                )
 
     retrain_count = sum(1 for entry in logs if entry["event"] == "retrained")
     skipped_count = sum(1 for entry in logs if entry["event"] == "retrain_skipped")
-    print(f"Run complete | Retrains: {retrain_count} | Skipped Retrains: {skipped_count}")
+    print(
+        f"Run complete | Retrains: {retrain_count} | "
+        f"Skipped Retrains: {skipped_count} | Skipped Counter: {skipped_retrains}"
+    )
 
 
 if __name__ == "__main__":
