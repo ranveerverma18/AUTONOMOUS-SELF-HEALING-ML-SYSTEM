@@ -1,10 +1,11 @@
 from pathlib import Path
+import numpy as np
 import mlflow
 import mlflow.sklearn
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GroupShuffleSplit, train_test_split
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_absolute_error
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 mlflow.set_tracking_uri("sqlite:///mlflow.db")
 mlflow.set_experiment("Default")
@@ -24,12 +25,21 @@ def _fit_model_from_xy(X_train, y_train):
     return model, scaler
 
 
-def _log_mlflow_run(model, params, metrics, run_name):
+def _log_mlflow_run(model, params, metrics, run_name, trigger=None):
     def _write_run():
         print("🔥 MLflow run starting")
         active_run = mlflow.active_run()
         with mlflow.start_run(run_name=run_name, nested=active_run is not None):
             logging_warnings = []
+
+            try:
+                mlflow.set_tag("stage", run_name)
+                mlflow.set_tag("model_type", "RandomForest")
+                mlflow.set_tag("pipeline", "self_healing_ml")
+                if trigger is not None:
+                    mlflow.set_tag("trigger", trigger)
+            except Exception as err:
+                logging_warnings.append(f"tag_logging_failed: {err}")
 
             try:
                 for key, value in params.items():
@@ -75,7 +85,13 @@ def _log_mlflow_run(model, params, metrics, run_name):
             print(f"MLflow logging skipped: {err} | fallback failed: {fallback_err}")
 
 
-def train_model(df, return_mae=False):
+def train_model(
+    df,
+    return_mae=False,
+    model_name="train_model",
+    cycle=None,
+    trigger=None,
+):
     df = df.dropna()
     print("Training rows:", len(df))
     print("Columns:", df.columns)
@@ -96,9 +112,13 @@ def train_model(df, return_mae=False):
                 "training_mode": "full_buffer_fallback",
                 "fallback_reason": reason,
                 "rows": len(X),
+                "buffer_size": len(df),
+                "cycle": cycle if cycle is not None else -1,
+                "retrain_reason": "drift_triggered" if trigger == "drift" else "none",
             },
             metrics={},
-            run_name="train_model_fallback",
+            run_name=f"{model_name}_fallback",
+            trigger=trigger,
         )
 
         print(f"Model trained on full retrain buffer ({reason})")
@@ -112,15 +132,20 @@ def train_model(df, return_mae=False):
         return fit_on_all_data("too few samples")
 
     if groups.nunique() < 2:
-        return fit_on_all_data("only one unit group")
+        X_train, X_test, y_train, y_test = train_test_split(
+            X,
+            y,
+            test_size=0.2,
+            random_state=42,
+        )
+    else:
+        try:
+            train_idx, test_idx = next(splitter.split(X, y, groups=groups))
+        except ValueError:
+            return fit_on_all_data("group split failed")
 
-    try:
-        train_idx, test_idx = next(splitter.split(X, y, groups=groups))
-    except ValueError:
-        return fit_on_all_data("group split failed")
-
-    X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
-    y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+        X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
+        y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
 
     model, scaler = _fit_model_from_xy(X_train, y_train)
     X_test_scaled = scaler.transform(X_test)
@@ -128,6 +153,7 @@ def train_model(df, return_mae=False):
     # evaluation
     y_pred = model.predict(X_test_scaled)
     mae = mean_absolute_error(y_test, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
 
     _log_mlflow_run(
         model=model,
@@ -135,12 +161,19 @@ def train_model(df, return_mae=False):
             "model": "RandomForestRegressor",
             "n_estimators": 200,
             "max_depth": 12,
-            "splitter": "GroupShuffleSplit",
+            "splitter": "train_test_split" if groups.nunique() < 2 else "GroupShuffleSplit",
             "test_size": 0.2,
             "rows": len(X),
+            "buffer_size": len(df),
+            "cycle": cycle if cycle is not None else -1,
+            "retrain_reason": "drift_triggered" if trigger == "drift" else "none",
         },
-        metrics={"mae": mae},
-        run_name="train_model",
+        metrics={
+            "mae": mae,
+            "rmse": rmse,
+        },
+        run_name=model_name,
+        trigger=trigger,
     )
 
     print(f"Model trained successfully | MAE: {mae:.2f}")
