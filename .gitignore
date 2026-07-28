@@ -1,7 +1,5 @@
 # Documentation files
-*.md
-!README.md
-
+*.html
 # Python
 __pycache__/
 *.py[cod]
@@ -11,6 +9,7 @@ __pycache__/
 env/
 venv/
 ENV/
+.venv/
 build/
 develop-eggs/
 dist/
@@ -26,12 +25,11 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+.mypy_cache/
 
-# MLflow
-mlruns/
-mlflow.db
-mlflow.db-shm
-mlflow.db-wal
+# Environment files
+.env
+.env.*
 
 # Logs
 logs/
@@ -60,3 +58,7 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Frontend (Vite/React)
+frontend/node_modules/
+frontend/dist/

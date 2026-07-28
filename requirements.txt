@@ -1,0 +1,11 @@
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+pydantic>=2.8,<3.0
+# numpy>=2.3.4 is required by river 0.25 — this single floor pin forces
+# pip's resolver to pick only numpy-2.x-compatible wheels for scikit-learn,
+# scipy, and pandas, preventing the "numpy.dtype size changed" ABI clash.
+numpy>=2.3.4
+scipy>=1.15
+scikit-learn>=1.5
+pandas>=2.2
+river>=0.25

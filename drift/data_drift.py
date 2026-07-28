@@ -173,26 +173,4 @@ class DataDriftDetector:
     def update(self, data_point):
         result = self.update_with_details(data_point)
         return result["drift_detected"]
-    
-
-"""
-ML MONITORING: DATA DRIFT DETECTION
------------------------------------
-
-1. KOLMOGOROV-SMIRNOV (KS) TEST
-   - Purpose: Detects if numerical feature distributions have shifted over time.
-   - Mechanism: Compares Cumulative Distribution Functions (CDFs) of Reference vs. Current data.
-   - Metric: The 'D-statistic' represents the maximum vertical gap between the two CDFs.
-   - Decision: If the calculated p-value < significance level (Alpha), drift is detected.
-   - Benefit: Non-parametric; it works regardless of whether data is normally distributed.
-
-2. BONFERRONI CORRECTION (STRICT MODE)
-   - Purpose: Solves the 'Multiple Testing Problem' when monitoring many features at once.
-   - Problem: Testing 100 features at a 5% error rate (0.05) likely causes 5 false alarms.
-   - Mechanism: Divides the Alpha by the number of features being tested (Alpha / N).
-   - Logic: Makes the threshold much 'stricter' to ensure alerts are high-confidence.
-   - Result: Significantly reduces False Positives (Type I Errors) in drift reports.
-"""
-
-# Example usage in monitoring logic:
-# drift_detected = p_value < (0.05 / num_features)
+    
