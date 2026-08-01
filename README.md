@@ -397,7 +397,7 @@ The `RateLimitController` maintains a 500-event FIFO queue and dynamically adjus
 | **Draining** | Backlog > 5 events | Process at full ceiling to clear queue |
 | **Protecting** | Drift detected or retraining active | Reduce to 60% of ceiling |
 | **Throttling** | Incoming rate > applied limit | Flag for audit; queue builds |
-| **Bypassed** | Rate limiting disabled | Process at hardware capacity (40 eps) |
+| **Bypassed** | Rate limiting disabled | Process at hardware capacity (~40 eps) |
 
 Load shedding: when the queue reaches capacity (500), the oldest event is discarded. An audit entry is written on the first drop and every 100 drops thereafter.
 
