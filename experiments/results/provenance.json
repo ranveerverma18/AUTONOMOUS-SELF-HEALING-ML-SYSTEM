@@ -1,0 +1,167 @@
+{
+  "report_version": "1.0",
+  "generated_date": "2026-08-25T16:09:14.429173",
+  "phase": "3F",
+  "status": "complete",
+  "dataset": {
+    "source": "C-MAPSS Turbofan Engine Degradation (FD001)",
+    "files": {
+      "train": {
+        "path": "dataset/raw/train_FD001.txt",
+        "checksum_md5": "1721c96c01e188569f0e7bb16b1ea493"
+      },
+      "test": {
+        "path": "dataset/raw/test_FD001.txt",
+        "checksum_md5": "049f39b8448989ac72f375df5234d733"
+      },
+      "rul": {
+        "path": "dataset/raw/RUL_FD001.txt",
+        "checksum_md5": "e7ac1c848b4316d89fd8b4637db53004"
+      }
+    }
+  },
+  "experimental_design": {
+    "type": "full_factorial",
+    "factors": {
+      "strategies": [
+        "static",
+        "scheduled",
+        "naive_adaptive",
+        "proposed"
+      ],
+      "scenarios": [
+        "concept_drift",
+        "correlated_drift",
+        "drift_recovery",
+        "gradual_drift",
+        "high_noise",
+        "intermittent_spikes",
+        "sensor_failure",
+        "sudden_spike"
+      ],
+      "seeds": [
+        42,
+        123,
+        456
+      ]
+    },
+    "total_runs": 96,
+    "block_structure": "scenario_seed",
+    "blocks": 24
+  },
+  "git_commits": {
+    "original_experiment": {
+      "commit": "fa6cbd5571184daf2ddbebd319aaf6614c276f9b",
+      "short": "fa6cbd5",
+      "date": "2026-08-22",
+      "message": "feat(reproducibility): add statistical analysis pipeline"
+    },
+    "analysis_corrections": [
+      {
+        "commit": "877a39d",
+        "date": "2026-08-22",
+        "message": "fix(verifier): handle naive_adaptive strategy parsing correctly",
+        "type": "analysis_code_only"
+      },
+      {
+        "commit": "dbba719",
+        "date": "2026-08-25",
+        "message": "fix(statistical_analysis): handle numpy bool serialization",
+        "type": "analysis_code_only"
+      },
+      {
+        "commit": "6e81a33",
+        "date": "2026-08-25",
+        "message": "fix(statistical_analysis): correct significant_corrected logic and provenance",
+        "type": "analysis_code_only",
+        "impact": "significant_comparisons: 24/30 -> 27/30"
+      },
+      {
+        "commit": "6aac3fb11b44e4fad5ac9eb816078f6bc8afe603",
+        "short": "6aac3fb",
+        "date": "2026-08-25",
+        "message": "feat(figures): add publication figure generation tool",
+        "type": "analysis_code_addition"
+      }
+    ],
+    "current_head": "6aac3fb11b44e4fad5ac9eb816078f6bc8afe603"
+  },
+  "experimental_outputs": {
+    "raw_csvs": 96,
+    "summary_jsons": 96,
+    "execution_logs": 192,
+    "total_artifacts": 288
+  },
+  "phases": {
+    "3a_completion_verification": {
+      "status": "pass",
+      "valid_runs": 96,
+      "invalid_runs": 0,
+      "missing_runs": 0
+    },
+    "3b_aggregation": {
+      "status": "pass",
+      "rows_aggregated": 96,
+      "output": "experiments/results/aggregated_results.csv"
+    },
+    "3c_qc": {
+      "status": "pass",
+      "errors": 0,
+      "warnings": 0
+    },
+    "3d_statistical_analysis": {
+      "status": "pass_corrected",
+      "friedman_tests": 5,
+      "pairwise_tests": 30,
+      "significant_comparisons": 27,
+      "correction": "significant_corrected logic fixed (commit 6e81a33)"
+    },
+    "3e_figures": {
+      "status": "complete_regenerated",
+      "figures": 8,
+      "resolution_dpi": 300,
+      "deterministic": true
+    },
+    "3f_provenance": {
+      "status": "complete",
+      "report": "PHASE_3F_PROVENANCE_REPORT.md"
+    }
+  },
+  "statistical_results": {
+    "friedman_all_significant": true,
+    "pairwise_significant": 27,
+    "pairwise_total": 30,
+    "significance_rate": 0.9,
+    "block_structure": "scenario_seed",
+    "blocks": 24,
+    "alpha": 0.05
+  },
+  "software_environment": {
+    "python": "3.12.0",
+    "numpy": "2.5.1",
+    "scipy": "1.18.0",
+    "pandas": "3.0.3",
+    "scikit-learn": "1.9.0",
+    "matplotlib": "3.9.2",
+    "seaborn": "0.13.2",
+    "river": "0.25.0",
+    "platform": "Windows (win32)",
+    "shell": "bash"
+  },
+  "experiments_executed_after_original_matrix": 0,
+  "frozen_data_integrity": {
+    "dataset_checksum": "1721c96c01e188569f0e7bb16b1ea493",
+    "raw_csvs_unchanged": true,
+    "summary_jsons_unchanged": true,
+    "logs_unchanged": true,
+    "manifest_unchanged": true,
+    "aggregated_results_unchanged": true
+  },
+  "reproducibility": {
+    "experimental_outputs": "frozen_archived",
+    "analysis_pipeline": "fully_documented",
+    "statistical_results": "deterministic_from_frozen_data",
+    "figures": "byte_identical_regeneration",
+    "reruns_experiments_required": false
+  }
+}

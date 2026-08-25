@@ -1,20 +1,8 @@
 """
-api_server.py - Autonomous Self-Healing ML Dashboard Backend
+Autonomous Self-Healing ML Dashboard Backend.
 
-Full pipeline:
-  - Random Forest (sklearn) trained via ml/train.py
-  - ADWIN concept drift detection (river) via drift/adwin_detector.py
-  - KS-test feature drift detection via drift/data_drift.py
-  - Isolation Forest anomaly detection via drift/anomaly_detector.py
-  - Rolling error monitor via drift/error_monitor.py
-  - Confidence intervals from RF tree variance via ml/confidence_predictor.py
-  - Performance gate before shadow evaluation via ml/performance_gate.py
-  - Shadow A/B evaluation before model promotion via ml/shadow_evaluator.py
-  - Adaptive cooldown via decision/adaptive_cooldown.py
-  - Decision engine via decision/engine.py
-  - Adaptive ingestion rate control via rate_limiting/controller.py
-  - Dashboard metric helpers via metrics/calculator.py
-  - 8 controlled fault scenarios via scenarios/
+Real-time streaming ML pipeline with autonomous drift detection, retraining,
+shadow evaluation, and adaptive rate control.
 """
 
 from collections import Counter, deque
@@ -45,6 +33,7 @@ from metrics.calculator import (
     confidence_histogram,
 )
 from ml.confidence_predictor import ConfidencePredictor
+from ml.evaluation import split_training_and_validation
 from ml.performance_gate import ModelPerformanceGate
 from ml.shadow_evaluator import ShadowModelEvaluator
 from ml.train import train_model_with_holdout
@@ -63,10 +52,6 @@ MAX_EVENTS_PER_WORKER_TICK = 8
 MAX_PROCESSING_BURST_EVENTS = 24.0
 
 
-# ---------------------------------------------------------------------------
-# Request / Response models
-# ---------------------------------------------------------------------------
-
 class AnomalyRequest(BaseModel):
     scenario: str = Field(default="sudden_spike")
 
@@ -77,14 +62,12 @@ class ControlRequest(BaseModel):
     rateLimitEnabled: bool | None = None
 
 
-# ---------------------------------------------------------------------------
-# Streaming ML Runtime
-# ---------------------------------------------------------------------------
-
 class StreamingMLRuntime:
-    def __init__(self):
+    def __init__(self, stream_mode="legacy", random_seed=42):
         self.lock = Lock()
-        self.rng = np.random.default_rng(42)
+        self.random_seed = random_seed
+        self.rng = np.random.default_rng(random_seed)
+        self.stream_mode = stream_mode
         self.base_path = Path(__file__).resolve().parent
 
         # Stream controls
@@ -139,17 +122,17 @@ class StreamingMLRuntime:
         self.anomaly_detector = AnomalyDetector(contamination=0.05)
         self.adwin_detector = DriftDetector()
         self.data_drift_detector = DataDriftDetector(
-            window_size=80,
+            window_size=30,
             p_threshold=0.01,
-            drift_feature_ratio_threshold=0.45,
-            min_effect_size=0.12,
+            drift_feature_ratio_threshold=0.08,
+            min_effect_size=0.10,
         )
         self.error_monitor = ErrorMonitor(window_size=8)
         self.confidence_predictor = ConfidencePredictor(confidence_level=0.9)
         self.performance_gate = ModelPerformanceGate(improvement_threshold=0.95)
         self.shadow_evaluator = ShadowModelEvaluator(window_size=20)
-        self.engine = DecisionEngine(error_threshold=75)
-        self.cooldown = AdaptiveCooldown(min_cooldown=30, max_cooldown=75)
+        self.engine = DecisionEngine(error_threshold=45)
+        self.cooldown = AdaptiveCooldown(min_cooldown=15, max_cooldown=60)
 
         # Load data and train initial model
         self._load_and_train()
@@ -168,10 +151,6 @@ class StreamingMLRuntime:
         self._warm_up_stream()
         self._publish_dashboard_snapshot()
         self.start()
-
-    # -----------------------------------------------------------------------
-    # Data loading and initial training
-    # -----------------------------------------------------------------------
 
     def _load_and_train(self):
         raw_path = self.base_path / "dataset" / "raw" / "train_FD001.txt"
@@ -195,10 +174,7 @@ class StreamingMLRuntime:
             train_df, min_retrain_rows=30
         )
 
-        # Stream records (shuffled)
-        stream_records = stream_df.to_dict(orient="records")
-        perm = self.rng.permutation(len(stream_records)).tolist()
-        self.stream_records = [stream_records[i] for i in perm]
+        self.stream_records = self._build_stream_records(stream_df)
 
         # Baseline statistics for drift display and scenario scaling
         self.baseline_means = {f: float(train_df[f].mean()) for f in FEATURE_COLUMNS}
@@ -208,6 +184,23 @@ class StreamingMLRuntime:
 
         # Fit Isolation Forest on training data
         self.anomaly_detector.fit(train_df)
+
+    def _build_stream_records(self, stream_df):
+        """Build dashboard stream records using an explicit ordering policy.
+
+        legacy mode preserves the original behavior: individual stream rows are
+        randomly permuted after the unit split.  research mode preserves each
+        C-MAPSS engine trajectory by sorting records by unit and cycle, which
+        makes sample index, cycle, and scenario start positions unambiguous.
+        """
+
+        if self.stream_mode == "research":
+            ordered = stream_df.sort_values(["unit", "cycle"]).reset_index(drop=True)
+            return ordered.to_dict(orient="records")
+
+        stream_records = stream_df.to_dict(orient="records")
+        perm = self.rng.permutation(len(stream_records)).tolist()
+        return [stream_records[i] for i in perm]
 
     def _scaled_feature_array(self, data):
         feature_names = getattr(self.scaler, "feature_names_in_", FEATURE_COLUMNS)
@@ -297,19 +290,10 @@ class StreamingMLRuntime:
             return float(np.mean(tree_predictions))
         return float(model.predict(scaled)[0])
 
-    # -----------------------------------------------------------------------
-    # Utility helpers
-    # -----------------------------------------------------------------------
-
     def _now_parts(self):
-        """Convenience timestamp helper (used for latency/point timestamps)."""
         from datetime import datetime as _dt
         now = _dt.now()
         return now.strftime("%H:%M:%S"), now.strftime("%Y-%m-%d %H:%M:%S")
-
-    # -----------------------------------------------------------------------
-    # Stream helpers
-    # -----------------------------------------------------------------------
 
     def _next_row(self):
         row = dict(self.stream_records[self.pointer % len(self.stream_records)])
@@ -347,10 +331,6 @@ class StreamingMLRuntime:
             self.active_scenario_cycle = 0
 
         return True
-
-    # -----------------------------------------------------------------------
-    # Metrics helpers  (delegated to metrics/calculator.py)
-    # -----------------------------------------------------------------------
 
     def _feature_scores(self):
         return feature_scores(
@@ -398,10 +378,6 @@ class StreamingMLRuntime:
 
         return applied
 
-    # -----------------------------------------------------------------------
-    # Retraining pipeline: performance gate -> shadow evaluation
-    # -----------------------------------------------------------------------
-
     def _maybe_retrain(self, action, drift_score, rolling_avg):
         should_retrain_now, required, elapsed = self.cooldown.should_retrain(
             self.sample_index, drift_score
@@ -410,10 +386,15 @@ class StreamingMLRuntime:
         if self.shadow_evaluator.is_evaluating or self.retrain_job_active:
             return required, elapsed
 
-        strong_signal = action in {"RETRAIN", "RETRAIN_URGENT"} or drift_score > 0.68
-        retrain_signal = (rolling_avg is not None and rolling_avg > 45) or drift_score > 0.72
+        DRIFT_THRESHOLD = 0.65
+        strong_signal = action in {"RETRAIN", "RETRAIN_URGENT", "MONITOR", "ALERT"} or drift_score > DRIFT_THRESHOLD
+        retrain_signal = (rolling_avg is not None and rolling_avg > 45) or drift_score > DRIFT_THRESHOLD
 
-        if not (strong_signal and should_retrain_now and retrain_signal and len(self.buffer) >= 55):
+        is_urgent = action == "RETRAIN_URGENT" or drift_score > 0.80
+        if is_urgent:
+            if not (should_retrain_now and len(self.buffer) >= 30):
+                return required, elapsed
+        elif not (strong_signal and should_retrain_now and retrain_signal and len(self.buffer) >= 55):
             return required, elapsed
 
         buffer_list = list(self.buffer)
@@ -480,9 +461,16 @@ class StreamingMLRuntime:
             [c for c in self.expected_train_columns if c in buffer_df.columns]
         ]
 
+        candidate_train_df, common_validation_df = split_training_and_validation(
+            buffer_df,
+            validation_fraction=0.25,
+            random_state=self.random_seed,
+            min_validation_rows=20,
+        )
+
         try:
-            new_model, new_scaler, new_mae = train_model_with_holdout(
-                buffer_df, min_retrain_rows=30
+            new_model, new_scaler, _ = train_model_with_holdout(
+                candidate_train_df, min_retrain_rows=30
             )
         except Exception as err:
             return {
@@ -502,20 +490,17 @@ class StreamingMLRuntime:
                 "status": "Warning",
             }
 
-        validation_df = pd.DataFrame(buffer_list[-20:])
-        validation_df = validation_df[
-            [c for c in self.expected_train_columns if c in validation_df.columns]
-        ]
-        should_accept, current_mae, candidate_mae, gate_reason = (
-            self.performance_gate.should_accept_new_model(
+        should_accept, production_result, candidate_result, improvement, gate_reason = (
+            self.performance_gate.should_accept_candidate(
                 production_model,
                 production_scaler,
                 new_model,
                 new_scaler,
-                new_mae,
-                validation_df,
+                common_validation_df,
             )
         )
+        current_mae = production_result.mae if production_result is not None else None
+        candidate_mae = candidate_result.mae if candidate_result is not None else None
 
         return {
             "accepted": should_accept,
@@ -529,6 +514,12 @@ class StreamingMLRuntime:
             "new_scaler": new_scaler,
             "current_mae": current_mae,
             "candidate_mae": candidate_mae,
+            "production_rmse": production_result.rmse if production_result is not None else None,
+            "candidate_rmse": candidate_result.rmse if candidate_result is not None else None,
+            "improvement": improvement,
+            "validation_rows": (
+                candidate_result.n_samples if candidate_result is not None else 0
+            ),
         }
 
     def _apply_retrain_result(self, result):
@@ -579,10 +570,6 @@ class StreamingMLRuntime:
                     "Warning",
                     f"Model refresh attempt did not meet quality threshold - production model continues unchanged"
                 )
-
-    # -----------------------------------------------------------------------
-    # Per-sample processing loop
-    # -----------------------------------------------------------------------
 
     def _create_stream_event(self):
         raw = self._next_row()
@@ -709,6 +696,24 @@ class StreamingMLRuntime:
                         self.anomaly_detector.fit(buffer_df)
                 except Exception:
                     pass
+
+                self.adwin_detector = DriftDetector()
+                self.cooldown.mark_retrain(self.sample_index)
+                if len(self.data_drift_detector.current_window) > 0:
+                    self.data_drift_detector.reference_window = deque(
+                        self.data_drift_detector.current_window,
+                        maxlen=self.data_drift_detector.window_size,
+                    )
+                    carryover_n = max(1, int(
+                        self.data_drift_detector.window_size
+                        * self.data_drift_detector.carryover_fraction
+                    ))
+                    self.data_drift_detector.current_window = deque(
+                        list(self.data_drift_detector.current_window)[-carryover_n:],
+                        maxlen=self.data_drift_detector.window_size,
+                    )
+                recent = list(self.buffer)[-60:]
+                self.buffer = deque(recent, maxlen=240)
             elif prod_mae is not None:
                 self.shadow_evaluator.stop_evaluation()
                 self.system_state = "Monitoring"
@@ -741,7 +746,7 @@ class StreamingMLRuntime:
         if rolling_avg is not None:
             drift_score = max(drift_score, min(rolling_avg / 70.0, 1.0) * 0.65)
         if adwin_drift:
-            drift_score = max(drift_score, 0.72)
+            drift_score = max(drift_score, 0.55)
         drift_score = float(drift_score)
 
         # --- Decision engine ---
@@ -755,7 +760,6 @@ class StreamingMLRuntime:
         self.confidences.append(confidence)
         status = status_from_metrics(drift_score, rolling_avg, action)
 
-        # Update system state
         if not self.shadow_evaluator.is_evaluating:
             if action.startswith("RETRAIN"):
                 self.system_state = "Self-healing"
@@ -876,10 +880,6 @@ class StreamingMLRuntime:
         }
         self.latest_point = point
         self.sample_index += 1
-
-    # -----------------------------------------------------------------------
-    # Background stream worker and dashboard snapshots
-    # -----------------------------------------------------------------------
 
     def start(self):
         if self.worker_thread and self.worker_thread.is_alive():
@@ -1134,10 +1134,6 @@ class StreamingMLRuntime:
             "auditLogs": self.audit.get_audit_logs(),
         }
 
-    # -----------------------------------------------------------------------
-    # Public API methods
-    # -----------------------------------------------------------------------
-
     def inject_anomaly(self, request):
         with self.lock:
             scenario_cls = SCENARIO_REGISTRY.get(request.scenario)
@@ -1208,10 +1204,6 @@ class StreamingMLRuntime:
         with self.snapshot_lock:
             return self.dashboard_snapshot
 
-
-# ---------------------------------------------------------------------------
-# FastAPI app
-# ---------------------------------------------------------------------------
 
 runtime = StreamingMLRuntime()
 app = FastAPI(title="Autonomous Self-Healing ML API", version="2.0.0")

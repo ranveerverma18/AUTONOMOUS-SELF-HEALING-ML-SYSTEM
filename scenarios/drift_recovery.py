@@ -23,7 +23,7 @@ class DriftRecovery:
         if cycle_index < 30:
             shift = 6.0
         else:
-            recovery_progress = (cycle_index - 30) / 30.0
+            recovery_progress = (cycle_index - 29) / 30.0
             shift = 6.0 * (1.0 - recovery_progress)
 
         for sensor in _ALL_SENSORS:

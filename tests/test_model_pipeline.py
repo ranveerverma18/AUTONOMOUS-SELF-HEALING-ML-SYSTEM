@@ -39,24 +39,23 @@ class TestModelPerformanceGate:
         assert ok is False
         assert reason == "new_model_is_none"
 
-    def test_rejects_none_new_mae(self):
+    def test_legacy_gate_ignores_private_candidate_mae(self):
         gate = ModelPerformanceGate()
         model, scaler = _fit_toy_model()
         ok, _, _, reason = gate.should_accept_new_model(
             model, scaler, model, scaler, None, _make_buffer_df()
         )
         assert ok is False
-        assert reason == "new_mae_is_none"
+        assert reason == "insufficient_improvement_0.0%"
 
-    def test_accepts_when_no_baseline(self):
+    def test_rejects_when_validation_is_too_small(self):
         gate = ModelPerformanceGate()
         model, scaler = _fit_toy_model()
-        # Buffer too small to evaluate current model → accept new one
         ok, _, _, reason = gate.should_accept_new_model(
             model, scaler, model, scaler, 5.0, _make_buffer_df(n=2)
         )
-        assert ok is True
-        assert reason == "no_baseline_comparison"
+        assert ok is False
+        assert reason == "production_validation_failed"
 
     def test_rejects_degraded_model(self):
         gate = ModelPerformanceGate(improvement_threshold=0.95)
@@ -67,7 +66,7 @@ class TestModelPerformanceGate:
             prod_model, prod_scaler, bad_model, bad_scaler, 999.0, buf
         )
         assert ok is False
-        assert "degraded" in reason
+        assert "insufficient_improvement" in reason
 
     def test_evaluate_model_returns_none_for_small_buffer(self):
         gate = ModelPerformanceGate()

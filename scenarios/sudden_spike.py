@@ -12,10 +12,10 @@ class SuddenSpike:
         "id": "sudden_spike",
         "name": "Sudden Sensor Drift",
         "severity": "Critical",
-        "duration": 45,
+        "duration": 80,
         "description": "All 21 sensors shift by +8σ immediately, simulating a severe environmental or mechanical fault.",
         "expectedBehavior": "Urgent retraining should be queued quickly. The quality gate evaluates the candidate model before shadow testing begins.",
-        "tags": ["adwin", "data-drift", "concept-drift", "critical"],
+        "tags": ["adwin", "data-drift", "critical"],
     }
 
     @staticmethod

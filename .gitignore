@@ -38,6 +38,8 @@ logs/
 # Plots
 plots/
 *.png
+# ...except the final committed publication figures
+!experiments/results/figures/*.png
 
 # IDE
 .vscode/
@@ -58,6 +60,15 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Experiment raw/per-run outputs (preserved in external research archive,
+# not tracked in Git — only compact aggregated artifacts are committed)
+experiments/results/raw/
+experiments/results/aggregated/
+experiments/results/logs/
+experiments/results/mini_matrix/
+experiments/results/matrix_execution.log.json
+experiments/results/matrix_execution_status.csv
 
 # Frontend (Vite/React)
 frontend/node_modules/

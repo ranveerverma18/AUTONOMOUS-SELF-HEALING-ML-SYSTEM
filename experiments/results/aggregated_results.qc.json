@@ -1,0 +1,21 @@
+{
+  "aggregated_file": "experiments\\results\\aggregated_results.csv",
+  "manifest_file": "experiments\\results\\experiment_manifest.csv",
+  "total_rows": 96,
+  "passed": true,
+  "summary": {
+    "missing_columns": [],
+    "duplicate_run_ids": [],
+    "duplicate_combinations": [],
+    "unexpected_strategies": [],
+    "unexpected_scenarios": [],
+    "unexpected_seeds": [],
+    "nan_values": 0,
+    "inf_values": 0,
+    "config_inconsistencies": 0,
+    "untraceable_runs": 0,
+    "missing_from_manifest": [],
+    "extra_in_aggregated": []
+  },
+  "issues": []
+}
