@@ -17,6 +17,7 @@ A production-grade, real-time machine learning pipeline for predictive maintenan
 - [Fault Injection Scenarios](#fault-injection-scenarios)
 - [Test Suite](#test-suite)
 - [Research Experiment Framework](#research-experiment-framework)
+- [Research Paper](#research-paper)
 - [Pipeline Deep Dive](#pipeline-deep-dive)
 
 ---
@@ -590,6 +591,113 @@ python -m scripts.analysis.aggregate_results \
 ### Where Raw Outputs Are Archived
 
 The 96 raw event-level CSVs, 96 per-run summary JSONs, execution logs, and the mini-matrix validation artifacts used to bring up this pipeline are preserved outside Git in an external research archive, along with a checksum manifest. They are intentionally excluded from version control (see `.gitignore`) to keep the repository lightweight; the compact artifacts under `experiments/results/` contain everything needed to verify and cite the final results.
+
+---
+
+## Research Paper
+
+**Title:** *Conservative Multi-Gated Adaptation for Physical Prognostics: Trading Prediction Accuracy for Model Stability in Non-Stationary Streams*
+
+**Status:** Draft completed (Phase 3G, August 2026)
+
+**Location:** `paper/RESEARCH_PAPER_DRAFT.md`
+
+### Abstract
+
+Adaptive model management for physical prognostics faces a fundamental trade-off: aggressive adaptation (frequent retraining) minimizes prediction error but increases model churn and operational risk, while conservative adaptation (rigorous gating) maximizes model stability but may degrade prediction accuracy. This work presents an integrated closed-loop MLOps architecture combining multi-channel statistical drift detection, autonomous background retraining, and two-stage model validation (offline performance gate + live parallel shadow evaluation) for continuous RUL regression on streaming turbofan telemetry.
+
+A comprehensive 96-run controlled experiment (4 strategies × 8 degradation scenarios × 3 seeds, blocked factorial design) on NASA C-MAPSS FD001 demonstrates that conservative multi-gated adaptation achieves 6.4–12.6× lower model replacement frequency than aggressive baselines (1.83 vs. 11.67 vs. 23.0 promotions per 2400-cycle stream, *p* < 0.001) at the cost of 8.5–23.9% higher prediction error (MAE 10.79 vs. 9.94 vs. 8.71, *p* < 0.001) and 9.2× higher adaptation overhead than naive adaptive (46.2s vs. 5.0s, *p* < 0.001).
+
+### Key Findings
+
+1. **Stability–Accuracy Trade-off:** No single strategy optimizes both model stability (low promotion frequency) and prediction accuracy (low MAE/RMSE). Scheduled adaptation achieves best accuracy but maximum churn (23 promotions). Proposed conservative gating achieves minimum churn (1.83 promotions) but higher error.
+
+2. **Domain-Specific Optimal Policies:** Safety-critical systems (aerospace, medical) may prioritize stability (proposed strategy), while offline batch prediction (maintenance scheduling) may prioritize accuracy (scheduled strategy).
+
+3. **Two-Stage Gating Effectiveness:** The proposed strategy's offline gate rejects 83.6% of candidates (10.17 / 12.17). Shadow evaluation provides a second validation layer, though 45.5% of promotions are "degraded" (validation-production distribution mismatch).
+
+4. **Statistical Rigor:** All five primary metrics (MAE, RMSE, detection delay, model promotions, adaptation time) show statistically significant differences (Friedman tests, *p* < 0.001). 27/30 pairwise comparisons remain significant after Holm-Bonferroni correction.
+
+### Paper Structure
+
+- **Section 1:** Introduction (motivation, literature gap, research questions, contributions)
+- **Section 2:** Related Work (physical prognostics, drift detection, autonomic ML, shadow testing)
+- **Section 3:** System Architecture (multi-channel detection, decision engine, gating, shadow evaluation)
+- **Section 4:** Experimental Methodology (NASA C-MAPSS FD001, 4 strategies, 8 scenarios, 96-run factorial design)
+- **Section 5:** Results (trade-off quantification, statistical significance, scenario-level analysis)
+- **Section 6:** Discussion (interpretations, domain implications, degraded promotions)
+- **Section 7:** Limitations (single dataset, simulated scenarios, fixed thresholds, RQ4 out of scope)
+- **Section 8:** Future Work (ablation studies, catastrophic candidate injection, cross-domain generalization)
+- **Section 9:** Conclusion
+- **Section 10:** Acknowledgments
+- **Section 11:** References
+- **Appendix A:** Reproducibility Instructions
+- **Appendix B:** Full Statistical Analysis Tables
+
+### Supporting Documents
+
+- **Results Traceability:** `paper/RESULTS_TRACEABILITY.md` — maps every numerical claim in the paper to its authoritative source artifact (aggregated_results.csv, statistical_analysis.json, provenance.json)
+- **Figures (8 total):** All figures located in `experiments/results/figures/` at 300 DPI
+  - mae_boxplot.png, rmse_boxplot.png
+  - mae_by_scenario.png, rmse_by_scenario.png
+  - strategy_comparison_barplot.png
+  - adaptation_metrics_combined.png
+  - effect_size_heatmap.png
+  - pairwise_significance_heatmap.png
+
+### Research Questions Addressed
+
+| RQ | Topic | Status |
+|----|-------|--------|
+| RQ1 | Model adaptation strategies and RUL prediction accuracy under non-stationary degradation | ✅ Fully Answered |
+| RQ2 | Candidate filtering and model-promotion behavior via offline validation + live shadow evaluation | ✅ Fully Answered |
+| RQ3 | Trade-offs (accuracy vs. drift detection delay vs. promotion frequency vs. adaptation time) | ✅ Fully Answered |
+
+**Core Contribution:** RQ3 provides the strongest empirical result—a clear, statistically validated quantification of the stability–accuracy–overhead trade-off across diverse degradation scenarios.
+
+### Experimental Provenance
+
+- **Original Experiment Commit:** `fa6cbd5571184daf2ddbebd319aaf6614c276f9b`
+- **Dataset Checksum (MD5):** `1721c96c01e188569f0e7bb16b1ea493` (train_FD001.txt)
+- **Execution Date:** August 25, 2026 (00:36–04:24 UTC+5:30)
+- **Total Runs:** 96/96 successful, 0 failures, 0 skipped, 0 reruns
+- **Software Versions:**
+  - Python 3.12.0
+  - NumPy 2.5.1
+  - SciPy 1.18.0
+  - pandas 3.0.3
+  - scikit-learn 1.9.0
+  - matplotlib 3.9.2
+  - seaborn 0.13.2
+  - river 0.25.0
+
+### Reproducibility
+
+All experiments are fully reproducible using the deterministic pipeline documented in `scripts/README.md`. The complete provenance chain (git commits, dataset checksums, software versions, random seeds) is tracked in `experiments/results/provenance.json`.
+
+To reproduce the analysis (without rerunning experiments):
+```bash
+# Statistical analysis
+python -m scripts.analysis.statistical_analysis \
+  --aggregated experiments/results/aggregated_results.csv \
+  --manifest experiments/results/experiment_manifest.csv \
+  --qc experiments/results/aggregated_results.qc.json \
+  --output experiments/results/statistical_analysis.json
+
+# Figure generation
+python -m scripts.analysis.generate_figures \
+  --aggregated experiments/results/aggregated_results.csv \
+  --statistical experiments/results/statistical_analysis.json \
+  --output-dir experiments/results/figures
+```
+
+To reproduce the full 96-run experiment matrix (approximately 4 hours):
+```bash
+# See scripts/README.md for complete orchestration pipeline
+python -m scripts.matrix_orchestration.run_matrix \
+  --manifest experiments/results/experiment_manifest.csv \
+  --yes
+```
 
 ---
 
